@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background: #1a1a2e;
+      color: #e0e0e0;
+    }
+    h1 { margin: 0 0 16px; font-size: 18px; color: #00d4ff; }
+    .controls { margin-bottom: 16px; display: flex; gap: 8px; align-items: center; }
+    .controls input {
+      background: #16213e;
+      border: 1px solid #0f3460;
+      color: #e0e0e0;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font-size: 13px;
+      width: 260px;
+    }
+    .controls button {
+      background: #0f3460;
+      color: #e0e0e0;
+      border: 1px solid #1a4080;
+      padding: 6px 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .controls button:hover { background: #1a4080; }
+    .controls button.active { background: #e94560; border-color: #e94560; }
+    .status {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .status.connected { background: #00ff88; }
+    .status.disconnected { background: #ff4444; }
+    #filters { margin-bottom: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .filter-btn {
+      background: #16213e;
+      color: #aaa;
+      border: 1px solid #0f3460;
+      padding: 4px 10px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .filter-btn.active { background: #0f3460; color: #00d4ff; border-color: #00d4ff; }
+    #events {
+      font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+      font-size: 12px;
+      line-height: 1.6;
+      overflow-y: auto;
+      max-height: calc(100vh - 160px);
+    }
+    .event {
+      padding: 6px 10px;
+      border-bottom: 1px solid #16213e;
+      display: flex;
+      gap: 10px;
+    }
+    .event:hover { background: #16213e33; }
+    .event .time { color: #666; white-space: nowrap; }
+    .event .type {
+      font-weight: 600;
+      min-width: 110px;
+      white-space: nowrap;
+    }
+    .event .type.console { color: #ffd700; }
+    .event .type.js-error { color: #ff4444; }
+    .event .type.promise-rejection { color: #ff6b6b; }
+    .event .type.network { color: #00d4ff; }
+    .event .type.network-request { color: #00d4ff; }
+    .event .type.network-response { color: #00ff88; }
+    .event .type.network-complete { color: #888; }
+    .event .type.navigation { color: #bb86fc; }
+    .event .type.page-info { color: #03dac6; }
+    .event .type.performance { color: #ff9800; }
+    .event .type.click { color: #e0e0e0; }
+    .event .type.form-submit { color: #e0e0e0; }
+    .event .type.visibility-change { color: #888; }
+    .event .detail { color: #aaa; word-break: break-all; }
+    .event .detail .key { color: #888; }
+    .count { color: #666; font-size: 12px; margin-left: auto; }
+  </style>
+</head>
+<body>
+  <h1><span class="status disconnected" id="statusDot"></span> NetCaptor</h1>
+  <div class="controls">
+    <input type="text" id="serverUrl" placeholder="ws://localhost:3000" />
+    <button id="connectBtn">Connect</button>
+    <button id="clearBtn">Clear</button>
+    <span class="count" id="eventCount">0 events</span>
+  </div>
+  <div id="filters"></div>
+  <div id="events"></div>
+  <script src="devtools-panel.js"></script>
+</body>
+</html>
