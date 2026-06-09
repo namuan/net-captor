@@ -168,9 +168,19 @@
 
   // --- Connect to server ---
   function connect() {
-    var url = serverUrlInput.value || "ws://localhost:3000";
-    _log("[NetCaptor Panel] Connecting to " + url + "...");
+    var baseUrl = serverUrlInput.value || "ws://localhost:3000";
+    chrome.storage.local.get(["apiToken"], function (result) {
+      var token = result.apiToken || "";
+      var url = baseUrl;
+      if (token) {
+        url += (baseUrl.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(token);
+      }
+      _log("[NetCaptor Panel] Connecting to " + baseUrl + "...");
+      doConnect(url);
+    });
+  }
 
+  function doConnect(url) {
     if (ws) ws.close();
 
     try {

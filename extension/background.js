@@ -1,22 +1,36 @@
 const DEFAULT_SERVER = "ws://localhost:3000";
-const API_KEY = "local-monitor-secret";
+const DEFAULT_TOKEN = "";
 
 let ws = null;
 let serverUrl = DEFAULT_SERVER;
+let apiToken = DEFAULT_TOKEN;
 let reconnectTimer = null;
 let pendingMessages = [];
 let lastSessionId = null;
 
-function getServerUrl() {
+function getConfig() {
   return new Promise((resolve) => {
-    chrome.storage.local.get(["serverUrl"], (result) => {
-      resolve(result.serverUrl || DEFAULT_SERVER);
+    chrome.storage.local.get(["serverUrl", "apiToken"], (result) => {
+      resolve({
+        serverUrl: result.serverUrl || DEFAULT_SERVER,
+        apiToken: result.apiToken || DEFAULT_TOKEN,
+      });
     });
   });
 }
 
+function buildWsUrl(baseUrl, token) {
+  if (!token) return baseUrl;
+  const sep = baseUrl.includes("?") ? "&" : "?";
+  return baseUrl + sep + "token=" + encodeURIComponent(token);
+}
+
 async function connect() {
-  serverUrl = await getServerUrl();
+  const config = await getConfig();
+  serverUrl = config.serverUrl;
+  apiToken = config.apiToken;
+
+  const wsUrl = buildWsUrl(serverUrl, apiToken);
   console.log(`[NetCaptor] Connecting to ${serverUrl}...`);
 
   if (ws && ws.readyState === WebSocket.OPEN) {
@@ -25,10 +39,10 @@ async function connect() {
   }
 
   try {
-    ws = new WebSocket(serverUrl);
+    ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      console.log("[NetCaptor] ✓ Connected to server");
+      console.log("[NetCaptor] Connected to server");
       console.log(`[NetCaptor] Flushing ${pendingMessages.length} pending messages`);
       while (pendingMessages.length > 0) {
         const msg = pendingMessages.shift();
@@ -38,19 +52,19 @@ async function connect() {
     };
 
     ws.onclose = (event) => {
-      console.log(`[NetCaptor] ✗ Disconnected (code=${event.code} reason=${event.reason || "none"})`);
+      console.log(`[NetCaptor] Disconnected (code=${event.code} reason=${event.reason || "none"})`);
       scheduleReconnect();
     };
 
     ws.onerror = (err) => {
-      console.error("[NetCaptor] ✗ WebSocket error:", err.message || err);
+      console.error("[NetCaptor] WebSocket error:", err.message || err);
     };
 
     ws.onmessage = (event) => {
       console.log("[NetCaptor] ← ws:", event.data);
     };
   } catch (e) {
-    console.error("[NetCaptor] ✗ Connection failed:", e.message || e);
+    console.error("[NetCaptor] Connection failed:", e.message || e);
     scheduleReconnect();
   }
 }
@@ -76,12 +90,11 @@ function sendEvent(eventType, payload) {
     console.log(`[NetCaptor] → ws: ${eventType}`);
     ws.send(JSON.stringify(msg));
   } else {
-    console.log(`[NetCaptor] ⏳ Queueing: ${eventType} (ws state=${ws?.readyState ?? "null"})`);
+    console.log(`[NetCaptor] Queueing: ${eventType} (ws state=${ws?.readyState ?? "null"})`);
     pendingMessages.push(msg);
   }
 }
 
-// Inject network interceptors into the page's MAIN world
 function injectIntoTab(tabId) {
   chrome.scripting.executeScript({
     target: { tabId, allFrames: false },
@@ -99,28 +112,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const tabId = sender.tab?.id;
     const sessionId = tabId ? `tab-${tabId}` : "unknown";
     lastSessionId = sessionId;
-    const enriched = {
-      ...message,
-      sessionId,
-    };
-    console.log(`[NetCaptor] Forwarding: ${enriched.eventType} session=${enriched.sessionId}`);
-    sendEvent(enriched.eventType, enriched.payload);
+    sendEvent(message.eventType, message.payload);
     sendResponse({ ok: true });
   }
 
   if (message.type === "get-status") {
-    const status = {
+    sendResponse({
       connected: ws?.readyState === WebSocket.OPEN,
       serverUrl,
-    };
-    console.log("[NetCaptor] Status requested:", status);
-    sendResponse(status);
+    });
     return true;
   }
 
-  if (message.type === "set-server") {
-    console.log(`[NetCaptor] Setting server: ${message.serverUrl}`);
-    chrome.storage.local.set({ serverUrl: message.serverUrl }, () => {
+  if (message.type === "set-config") {
+    console.log(`[NetCaptor] New config: ${message.serverUrl}`);
+    chrome.storage.local.set({
+      serverUrl: message.serverUrl || serverUrl,
+      apiToken: message.apiToken || apiToken,
+    }, () => {
       if (ws) ws.close();
       connect();
       sendResponse({ ok: true });
@@ -138,7 +147,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       title: tab.title,
       changeInfo,
     });
-    // Inject network interceptors when page starts loading
     injectIntoTab(tabId);
   }
 });

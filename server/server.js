@@ -1,29 +1,45 @@
 const express = require("express");
 const http = require("http");
 const { WebSocketServer } = require("ws");
-const cors = require("cors");
+const crypto = require("crypto");
 const path = require("path");
 const SessionManager = require("./sessionManager");
 const LogWriter = require("./logWriter");
 
 const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.API_KEY || "local-monitor-secret";
 const LOG_DIR = process.env.LOG_DIR || path.join(__dirname, "logs");
+const TOKEN = process.env.API_KEY || crypto.randomBytes(32).toString("hex");
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ noServer: true });
 
 const sessionManager = new SessionManager();
 const logWriter = new LogWriter(LOG_DIR);
 
-app.use(cors());
 app.use(express.json({ limit: "10mb" }));
+
+// Only allow local origins
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const host = req.headers.host || "";
+  const isLocal =
+    host.startsWith("localhost") ||
+    host.startsWith("127.0.0.1") ||
+    host.startsWith("[::1]");
+  const isExtension = origin && origin.startsWith("chrome-extension://");
+
+  if (req.path === "/health") return next();
+
+  if (origin && !isExtension && !isLocal) {
+    return res.status(403).json({ error: "Forbidden origin" });
+  }
+  next();
+});
 
 function authenticate(req, res, next) {
   const key = req.headers["x-api-key"];
-  console.log(`[HTTP] ${req.method} ${req.path} key=${key ? key.substring(0, 8) + "..." : "none"}`);
-  if (key !== API_KEY) {
+  if (key !== TOKEN) {
     return res.status(401).json({ error: "Invalid API key" });
   }
   next();
@@ -31,7 +47,6 @@ function authenticate(req, res, next) {
 
 app.get("/health", (req, res) => {
   const count = sessionManager.getActiveSessions().length;
-  console.log(`[HTTP] GET /health → ok, ${count} sessions`);
   res.json({ status: "ok", sessions: count });
 });
 
@@ -53,14 +68,29 @@ app.post("/events", authenticate, (req, res) => {
   }
 
   sessionManager.incrementEventCount(sessionId);
-
   logWriter.write(sessionId, { eventType, payload });
-  console.log(`[Event] Written: ${sessionId}/${eventType} (total: ${session.sessionEventCount || "?"})`);
+  console.log(`[Event] Written: ${sessionId}/${eventType}`);
 
   broadcast({ sessionId, eventType, payload });
-  console.log(`[WS] Broadcast to ${wss.clients.size} client(s)`);
-
   res.json({ ok: true });
+});
+
+// WebSocket upgrade with token validation
+server.on("upgrade", (req, socket, head) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const token = url.searchParams.get("token");
+  const origin = req.headers.origin || "";
+
+  if (token !== TOKEN) {
+    socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+    socket.destroy();
+    console.log("[WS] Rejected: invalid token");
+    return;
+  }
+
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.emit("connection", ws, req);
+  });
 });
 
 wss.on("connection", (ws) => {
@@ -83,7 +113,6 @@ wss.on("connection", (ws) => {
         let session = sessionManager.getSession(msg.sessionId);
         if (!session) {
           session = sessionManager.createSession(msg.tabId || 0, msg.payload?.url || "", msg.sessionId);
-          console.log(`[WS] Auto-created session: ${msg.sessionId}`);
         }
         sessionManager.incrementEventCount(msg.sessionId);
         logWriter.write(msg.sessionId, { eventType: msg.eventType, payload: msg.payload });
@@ -108,10 +137,12 @@ function broadcast(data) {
   });
 }
 
-server.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, "127.0.0.1", () => {
   console.log(`[Server] Running on http://localhost:${PORT}`);
   console.log(`[Server] WebSocket on ws://localhost:${PORT}`);
   console.log(`[Server] Logs: ${LOG_DIR}`);
+  console.log(`[Server] Token: ${TOKEN}`);
+  console.log("[Server] Bound to 127.0.0.1 — not accessible from network");
 });
 
 process.on("SIGINT", () => {

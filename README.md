@@ -31,14 +31,19 @@ npm install
 npm start
 ```
 
-Server runs on `http://localhost:3000` (WebSocket on the same port).
+Server binds to `127.0.0.1:3000` and prints a random token on startup:
+
+```
+[Server] Token: 72404cf90c67117cb9fa2f2a48135c0a...
+```
 
 ### 2. Load the extension
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
 3. Click **Load unpacked** → select the `extension/` directory
-4. Reload the extension after any code changes
+4. Click the extension icon, paste the **API Token** from server output
+5. Click **Save & Connect**
 
 ### 3. View events
 
@@ -75,6 +80,18 @@ content.js (isolated world)  ◀───┘
 background.js  ──WebSocket──▶  server
 ```
 
+## Security
+
+The server binds to `127.0.0.1` only — it cannot be reached from other machines on the network. A random 64-character hex token is generated on startup and must be included in all connections.
+
+| Protection | Mechanism |
+|---|---|
+| Network isolation | Binds to `127.0.0.1`, not `0.0.0.0` |
+| HTTP auth | `X-API-Key` header required on `/sessions` and `/events` |
+| WebSocket auth | `?token=` query param validated on upgrade |
+| Origin check | Non-local, non-extension origins rejected |
+| Token generation | `crypto.randomBytes(32)` on every startup |
+
 ## Configuration
 
 ### Server
@@ -84,12 +101,12 @@ Environment variables:
 | Variable | Default | Description |
 |---|---|---|
 | `PORT` | `3000` | Server port |
-| `API_KEY` | `local-monitor-secret` | Authentication key |
+| `API_KEY` | random | Override the auto-generated token |
 | `LOG_DIR` | `./logs` | Log file directory |
 
 ### Extension
 
-Click the extension popup to set the server URL (default: `ws://localhost:3000`).
+Click the extension icon to set the server URL and paste the API token shown when the server starts.
 
 ## Log Files
 
@@ -114,10 +131,9 @@ Each line:
 | Endpoint | Method | Auth | Description |
 |---|---|---|---|
 | `/health` | GET | No | Server status |
-| `/sessions` | GET | Yes | Active sessions |
-| `/events` | POST | Yes | Submit an event |
-
-All authenticated endpoints require the `X-API-Key` header.
+| `/sessions` | GET | `X-API-Key` | Active sessions |
+| `/events` | POST | `X-API-Key` | Submit an event |
+| WebSocket | `ws://` | `?token=` | Real-time event stream |
 
 ## License
 
