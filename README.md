@@ -4,19 +4,27 @@ Browser monitoring extension that captures page events and streams them to a loc
 
 ## Architecture
 
-```
-Browser Extension ──WebSocket──▶ Local Server ──▶ logs/
-
-┌─ Extension ──────────────────────────────────────┐
-│  background.js          inject.js (MAIN world)    │
-│  (service worker)  ──▶  fetch / XHR interceptors  │
-│        │                        │                 │
-│        │              content.js                   │
-│        ◀────────────  (relays page events)         │
-│        │                                           │
-│  devtools-panel.js                                 │
-│  (supplements with CDP network data)               │
-└────────────────────────────────────────────────────┘
+```mermaid
+graph TD
+    A[Browser Extension] --> B[Local Server]
+    B --> C[logs/]
+    
+    subgraph extension [Extension]
+        D[background.js]
+        E[inject.js (MAIN world)]
+        F[content.js]
+        G[devtools-panel.js]
+        
+        D -->|fetch/XHR interceptors| E
+        F -->|relays page events| D
+        G -->|supplements with CDP network data| D
+    end
+    
+    style extension fill:#f0fdfa,stroke:#0d9488,stroke-width:2px
+    
+    style A fill:#e6f7f3,stroke:#0d9488,stroke-width:2px
+    style B fill:#e6f7f3,stroke:#0d9488,stroke-width:2px
+    style C fill:#e6f7f3,stroke:#0d9488,stroke-width:2px
 ```
 
 **Extension** captures network requests (via MAIN-world injection), JS errors, navigation, user interactions, and performance metrics. **Server** receives events via WebSocket, manages per-tab sessions, and writes structured JSONL log files.
@@ -68,17 +76,30 @@ Open Chrome DevTools → **NetCaptor** panel. Events stream in real time with co
 
 Content scripts run in an isolated JavaScript world and cannot intercept the page's `window.fetch` or `XMLHttpRequest`. NetCaptor solves this by injecting a small script (`inject.js`) into the page's **MAIN world** via `chrome.scripting.executeScript({ world: "MAIN" })`.
 
+```mermaid
+graph LR
+    A[page (MAIN world)] --> B[inject.js overrides fetch/XHR]
+    B -->|CustomEvent<br/>"__netCaptorNetwork"| C[content.js (isolated world)]
+    
+    C -->|chrome.runtime.sendMessage| D[background.js]
+    D -.->|WebSocket| E[server]
+    
+    style A fill:#e6f7f3,stroke:#0d9488,stroke-width:2px
+    style B fill:#e6f7f3,stroke:#0d9488,stroke-width:2px
+    style C fill:#e6f7f3,stroke:#0d9488,stroke-width:2px
+    style D fill:#e6f7f3,stroke:#0d9488,stroke-width:2px
+    style E fill:#e6f7f3,stroke:#0d9488,stroke-width:2px
 ```
-page (MAIN world)          inject.js overrides fetch/XHR
-     │                           │
-     │  CustomEvent               │
-     ▼  "__netCaptorNetwork"      │
-content.js (isolated world)  ◀───┘
-     │
-     │  chrome.runtime.sendMessage
-     ▼
-background.js  ──WebSocket──▶  server
-```
+
+The **page in the MAIN world** runs `inject.js` which overrides `fetch` and `XMLHttpRequest` calls.
+
+When a network request occurs, `inject.js` creates a `CustomEvent` named `"__netCaptorNetwork"` containing the request details (method, URL, status, duration, size).
+
+This event is caught by `content.js` running in the **isolated world** (the standard content script world).
+
+The `content.js` then sends this event data to the background script via `chrome.runtime.sendMessage`.
+
+Finally, the **background.js** (service worker) establishes a WebSocket connection to the **server** and streams the captured network events in real-time for logging and analysis.
 
 ## Security
 
